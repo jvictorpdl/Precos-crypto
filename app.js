@@ -1,6 +1,3 @@
-// Remova a linha 'const axios = require('axios');'
-// No navegador, 'axios' já estará disponível globalmente porque você o incluiu no HTML via CDN.
-
 // Função existente para buscar preço em tempo real
 async function getCryptoPrice(cryptoId, currency) {
     const baseUrl = "https://api.coingecko.com/api/v3/simple/price";
@@ -26,15 +23,8 @@ async function getCryptoPrice(cryptoId, currency) {
     }
 }
 
-// NOVA FUNÇÃO: Buscar dados históricos
+// Função para buscar dados históricos (mantida como está)
 async function getCryptoHistoricalData(cryptoId, currency, days = 7) {
-    /**
-     * Buscar dados históricos de uma criptomoeda.
-     * @param {string} cryptoId - O ID da criptomoeda (ex: 'bitcoin').
-     * @param {string} currency - A moeda de comparação (ex: 'usd').
-     * @param {number} days - Número de dias para buscar dados históricos (1, 7, 14, 30, 90, 180, 365, "max").
-     * @returns {Promise<Array<[number, number]>|null>} Um array de [timestamp, price] ou null em caso de erro.
-     */
     const baseUrl = `https://api.coingecko.com/api/v3/coins/${cryptoId}/market_chart`;
     const params = {
         vs_currency: currency,
@@ -45,11 +35,9 @@ async function getCryptoHistoricalData(cryptoId, currency, days = 7) {
 
     try {
         const response = await axios.get(baseUrl, { params: params });
-        // A API retorna um objeto com 'prices', 'market_caps', 'total_volumes'
-        // Queremos a array 'prices', que é no formato [[timestamp, price], ...]
         return response.data.prices;
     } catch (error) {
-        console.error(`Erro ao buscar dados históricos: ${error.message}`);
+        console.error(`Erro ao buscar dados históricos para ${cryptoId}: ${error.message}`);
         if (error.response) {
             console.error(`Status: ${error.response.status}, Data: ${JSON.stringify(error.response.data)}`);
         }
@@ -57,70 +45,87 @@ async function getCryptoHistoricalData(cryptoId, currency, days = 7) {
     }
 }
 
-// Função para criar e atualizar o gráfico
+// Função para criar e atualizar o gráfico - AGORA ACEITA MÚLTIPLOS DATASETS
 let priceChart; // Variável global para armazenar a instância do gráfico
 
-async function plotPriceChart(cryptoId, currency, days = 7) {
-    const historicalData = await getCryptoHistoricalData(cryptoId, currency, days);
+async function plotPriceChart(datasets, currency) {
+    // datasets é um array de objetos, cada um com { cryptoId: 'bitcoin', historicalData: [[timestamp, price], ...] }
 
-    if (!historicalData || historicalData.length === 0) {
-        console.log("Não há dados históricos para plotar.");
-        // Opcional: exibir uma mensagem na tela para o usuário
+    if (!datasets || datasets.length === 0) {
+        console.log("Não há dados para plotar.");
         const ctx = document.getElementById('priceChart');
         if (ctx) {
-            ctx.getContext('2d').clearRect(0, 0, ctx.width, ctx.height); // Limpa o canvas
-            // Você pode adicionar um texto de "Dados indisponíveis" aqui, se quiser
+            ctx.getContext('2d').clearRect(0, 0, ctx.width, ctx.height);
         }
         return;
     }
 
-    // Prepare os dados para o Chart.js
-    const labels = historicalData.map(dataPoint => {
-        const date = new Date(dataPoint[0]); // timestamp em milissegundos
-        return date.toLocaleDateString('pt-BR'); // Formato da data para o eixo X
+    // Para garantir que os labels (datas) sejam consistentes, usaremos os labels do primeiro dataset
+    // Assumimos que todos os datasets cobrem o mesmo período de tempo
+    const labels = datasets[0].historicalData.map(dataPoint => {
+        const date = new Date(dataPoint[0]);
+        return date.toLocaleDateString('pt-BR');
     });
-    const prices = historicalData.map(dataPoint => dataPoint[1]); // Preços para o eixo Y
+
+    // Mapeia cada dataset para o formato que o Chart.js espera
+    const chartDatasets = datasets.map(dataset => {
+        const prices = dataset.historicalData.map(dataPoint => dataPoint[1]);
+        let borderColor, backgroundColor;
+
+        // Definir cores com base no cryptoId
+        if (dataset.cryptoId === 'bitcoin') {
+            borderColor = 'rgb(255, 159, 64)'; // Laranja para Bitcoin
+            backgroundColor = 'rgba(255, 159, 64, 0.2)';
+        } else if (dataset.cryptoId === 'ethereum') {
+            borderColor = 'rgb(153, 102, 255)'; // Roxo para Ethereum
+            backgroundColor = 'rgba(153, 102, 255, 0.2)';
+        } else {
+            // Cores padrão para outras criptos, se adicionarmos
+            borderColor = 'rgb(75, 192, 192)';
+            backgroundColor = 'rgba(75, 192, 192, 0.2)';
+        }
+
+        return {
+            label: `Preço de ${dataset.cryptoId.toUpperCase()} em ${currency.toUpperCase()}`,
+            data: prices,
+            borderColor: borderColor,
+            backgroundColor: backgroundColor,
+            borderWidth: 1,
+            fill: true 
+        };
+    });
 
     const ctx = document.getElementById('priceChart').getContext('2d');
 
-    // Se o gráfico já existe, destrua-o antes de criar um novo (útil para atualizações)
     if (priceChart) {
         priceChart.destroy();
     }
 
     priceChart = new Chart(ctx, {
-        type: 'line', // Tipo de gráfico: linha
+        type: 'line',
         data: {
-            labels: labels, // Datas no eixo X
-            datasets: [{
-                label: `Preço de ${cryptoId.toUpperCase()} em ${currency.toUpperCase()}`,
-                data: prices, // Preços no eixo Y
-                borderColor: 'rgb(75, 192, 192)', // Cor da linha
-                backgroundColor: 'rgba(75, 192, 192, 0.2)', // Cor de preenchimento abaixo da linha
-                borderWidth: 1,
-                fill: true // Preenche a área abaixo da linha
-            }]
+            labels: labels,
+            datasets: chartDatasets // Agora passamos um array de datasets
         },
         options: {
-            responsive: true, // Torna o gráfico responsivo
-            maintainAspectRatio: false, // Permite controlar a altura no CSS
+            responsive: true,
+            maintainAspectRatio: false,
             scales: {
                 x: {
-                    type: 'category', // Para as datas formatadas
+                    type: 'category',
                     title: {
                         display: true,
                         text: 'Data'
                     }
                 },
                 y: {
-                    beginAtZero: false, // Permite que o eixo Y não comece do zero, se os preços forem altos
+                    beginAtZero: false,
                     title: {
                         display: true,
                         text: `Preço (${currency.toUpperCase()})`
                     },
                     ticks: {
                         callback: function(value) {
-                            // Formata os valores do eixo Y como moeda
                             return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: currency.toUpperCase() }).format(value);
                         }
                     }
@@ -135,7 +140,6 @@ async function plotPriceChart(cryptoId, currency, days = 7) {
                                 label += ': ';
                             }
                             if (context.parsed.y !== null) {
-                                // Formata o valor da tooltip como moeda
                                 label += new Intl.NumberFormat('pt-BR', { style: 'currency', currency: currency.toUpperCase() }).format(context.parsed.y);
                             }
                             return label;
@@ -149,21 +153,53 @@ async function plotPriceChart(cryptoId, currency, days = 7) {
 
 // Função principal que orquestra tudo
 async function main() {
-    const cryptoId = "bitcoin";
-    const currency = "usd"; // Você pode mudar para 'brl' ou outra moeda
+    const currency = "usd"; // Moeda para ambos os gráficos
+    const days = 30; // Período histórico para ambos
 
-    // 1. Exibir preço atual
-    const currentPrice = await getCryptoPrice(cryptoId, currency);
+    // 1. Exibir preços atuais
+    const bitcoinId = "bitcoin";
+    const ethereumId = "ethereum";
+    
+    const currentBitcoinPrice = await getCryptoPrice(bitcoinId, currency);
+    const currentEthereumPrice = await getCryptoPrice(ethereumId, currency); // <-- Nova linha para buscar o preço do Ethereum
+
     const currentPriceElement = document.getElementById('current-price');
-    if (currentPrice !== null) {
-        currentPriceElement.textContent = `Preço atual do ${cryptoId.toUpperCase()} em ${currency.toUpperCase()}: ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: currency.toUpperCase() }).format(currentPrice)}`;
+    let priceText = "";
+
+    if (currentBitcoinPrice !== null) {
+        priceText += `Preço atual do Bitcoin (BTC) em ${currency.toUpperCase()}: ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: currency.toUpperCase() }).format(currentBitcoinPrice)}`;
     } else {
-        currentPriceElement.textContent = `Não foi possível obter o preço atual do ${cryptoId.toUpperCase()}.`;
+        priceText += `Não foi possível obter o preço atual do Bitcoin.`;
     }
 
-    // 2. Plotar o gráfico com dados dos últimos 30 dias
-    // Você pode alterar o número de dias para 7, 14, 90, 365 ou "max"
-    await plotPriceChart(cryptoId, currency, 30);
+    // Adiciona uma quebra de linha e o preço do Ethereum
+    priceText += "<br>"; // Adiciona uma quebra de linha para separar os preços
+    
+    if (currentEthereumPrice !== null) {
+        priceText += `Preço atual do Ethereum (ETH) em ${currency.toUpperCase()}: ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: currency.toUpperCase() }).format(currentEthereumPrice)}`;
+    } else {
+        priceText += `Não foi possível obter o preço atual do Ethereum.`;
+    }
+
+    currentPriceElement.innerHTML = priceText; // Usar innerHTML para interpretar <br>
+
+    // 2. Buscar dados históricos para Bitcoin
+    const bitcoinHistoricalData = await getCryptoHistoricalData(bitcoinId, currency, days);
+    
+    // 3. Buscar dados históricos para Ethereum
+    const ethereumHistoricalData = await getCryptoHistoricalData(ethereumId, currency, days);
+
+    // Prepare os datasets para a função de plotagem
+    const datasetsToPlot = [];
+    if (bitcoinHistoricalData) {
+        datasetsToPlot.push({ cryptoId: bitcoinId, historicalData: bitcoinHistoricalData });
+    }
+    if (ethereumHistoricalData) {
+        datasetsToPlot.push({ cryptoId: ethereumId, historicalData: ethereumHistoricalData });
+    }
+
+    // 4. Plotar o gráfico com ambos os datasets
+    await plotPriceChart(datasetsToPlot, currency);
 }
 
 // Garante que a função 'main' seja executada apenas quando toda a página HTML estiver carregada
